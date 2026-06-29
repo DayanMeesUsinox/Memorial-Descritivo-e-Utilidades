@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from io import BytesIO
 import math
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -14,6 +15,10 @@ from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
+
+SUMMARY_ITEMS_PER_PAGE = 24
+LOGO_FILENAME = "logo_usinox.jpg"
 
 
 @dataclass(frozen=True)
@@ -194,7 +199,101 @@ def _prepare_dataframe(excel_bytes: bytes) -> pd.DataFrame:
     return dataframe
 
 
-def _build_docx(dataframe: pd.DataFrame) -> bytes:
+def _build_titles(
+    dataframe: pd.DataFrame,
+    position_column: str | None,
+    description_column: str | None,
+) -> list[str]:
+    titles: list[str] = []
+    for _, row in dataframe.iterrows():
+        position = _safe_str(row.get(position_column, "")) if position_column else ""
+        description = (
+            _safe_str(row.get(description_column, ""))
+            if description_column
+            else ""
+        )
+
+        if position and description:
+            titles.append(f"{position} - {description}")
+        elif description:
+            titles.append(description)
+        elif position:
+            titles.append(position)
+        else:
+            titles.append("REGISTRO")
+    return titles
+
+
+def _configure_section(section) -> None:
+    section.top_margin = Cm(1.6)
+    section.bottom_margin = Cm(1.8)
+    section.left_margin = Cm(1.5)
+    section.right_margin = Cm(1.5)
+    section.header_distance = Cm(0.7)
+    section.footer_distance = Cm(0.7)
+
+
+def _clear_cell(cell) -> None:
+    cell.text = ""
+    if cell.paragraphs:
+        paragraph = cell.paragraphs[0]
+        for run in list(paragraph.runs):
+            run._element.getparent().remove(run._element)
+
+
+def _insert_logo(paragraph, image_path: Path, width_cm: float) -> None:
+    if image_path.exists():
+        run = paragraph.add_run()
+        run.add_picture(str(image_path), width=Cm(width_cm))
+
+
+def _setup_header_footer(section, project_name: str, logo_path: Path) -> None:
+    header = section.header
+    header_paragraph = header.paragraphs[0]
+    header_paragraph.text = ""
+    header_paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    run = header_paragraph.add_run("RELATÓRIO DE ACIONAMENTOS")
+    run.font.size = Pt(9)
+    run.font.color.rgb = RGBColor(0, 0, 0)
+    run.font.name = "Calibri"
+
+    subtitle_paragraph = header.add_paragraph()
+    subtitle_paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    subtitle_run = subtitle_paragraph.add_run(project_name)
+    subtitle_run.font.size = Pt(8)
+    subtitle_run.font.name = "Calibri"
+    subtitle_run.font.color.rgb = RGBColor(80, 80, 80)
+
+    footer = section.footer
+    table_width = section.page_width - section.left_margin - section.right_margin
+    footer_table = footer.add_table(rows=1, cols=2, width=table_width)
+    footer_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    footer_table.autofit = False
+
+    left_cell = footer_table.cell(0, 0)
+    right_cell = footer_table.cell(0, 1)
+    left_cell.width = Cm(4)
+    right_cell.width = Cm(12)
+
+    _clear_cell(left_cell)
+    _clear_cell(right_cell)
+
+    left_paragraph = left_cell.paragraphs[0]
+    left_paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    _insert_logo(left_paragraph, logo_path, width_cm=2.2)
+
+    right_paragraph = right_cell.paragraphs[0]
+    right_paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    right_paragraph.add_run("Página ")
+    _add_field(right_paragraph.add_run(), "PAGE  \\* MERGEFORMAT")
+    right_paragraph.add_run(" de ")
+    _add_field(right_paragraph.add_run(), "NUMPAGES  \\* MERGEFORMAT")
+    for run in right_paragraph.runs:
+        run.font.size = Pt(9)
+        run.font.name = "Calibri"
+
+
+def _build_docx(dataframe: pd.DataFrame, project_name: str) -> bytes:
     dataframe_title = dataframe.copy()
     dataframe_table = dataframe.copy()
 
@@ -232,61 +331,103 @@ def _build_docx(dataframe: pd.DataFrame) -> bytes:
         dataframe_title,
         ["DESCRICAO", "DESCRIÇÃO"],
     )
+    titles = _build_titles(dataframe_title, position_column, description_column)
 
     document = Document()
     section = document.sections[0]
-    section.top_margin = Cm(1.6)
-    section.bottom_margin = Cm(1.5)
-    section.left_margin = Cm(1.5)
-    section.right_margin = Cm(1.5)
-    section.header_distance = Cm(0.7)
-    section.footer_distance = Cm(0.7)
+    _configure_section(section)
+    logo_path = Path(__file__).resolve().parent / LOGO_FILENAME
+    _setup_header_footer(section, project_name, logo_path)
 
-    header_paragraph = section.header.paragraphs[0]
-    header_paragraph.text = "RELATÓRIO DE ACIONAMENTOS"
-    header_paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-    for run in header_paragraph.runs:
-        run.font.size = Pt(9)
-        run.font.color.rgb = RGBColor(0, 0, 0)
-        run.font.name = "Calibri"
+    # Capa
+    cover_title = document.add_paragraph()
+    cover_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    cover_title.paragraph_format.space_before = Pt(20)
+    _insert_logo(cover_title, logo_path, width_cm=12.0)
 
-    footer_paragraph = section.footer.paragraphs[0]
-    footer_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    footer_paragraph.add_run("Página ")
-    _add_field(footer_paragraph.add_run(), "PAGE  \\* MERGEFORMAT")
-    footer_paragraph.add_run(" de ")
-    _add_field(footer_paragraph.add_run(), "NUMPAGES  \\* MERGEFORMAT")
-    for run in footer_paragraph.runs:
-        run.font.size = Pt(9)
-        run.font.color.rgb = RGBColor(0, 0, 0)
-        run.font.name = "Calibri"
+    for _ in range(3):
+        document.add_paragraph()
 
+    title_paragraph = document.add_paragraph()
+    title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title_run = title_paragraph.add_run("RELATÓRIO DE ACIONAMENTOS")
+    title_run.bold = True
+    title_run.font.size = Pt(22)
+    title_run.font.name = "Calibri"
+
+    project_paragraph = document.add_paragraph()
+    project_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    project_run = project_paragraph.add_run(project_name)
+    project_run.bold = True
+    project_run.font.size = Pt(18)
+    project_run.font.name = "Calibri"
+    project_run.font.color.rgb = RGBColor(0, 91, 170)
+
+    info_paragraph = document.add_paragraph()
+    info_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    info_run = info_paragraph.add_run("Documento gerado automaticamente pelo Agente de Relatórios")
+    info_run.font.size = Pt(10)
+    info_run.font.name = "Calibri"
+    info_run.font.color.rgb = RGBColor(90, 90, 90)
+
+    document.add_page_break()
+
+    # Sumário manual
+    summary_page_count = max(1, math.ceil(len(titles) / SUMMARY_ITEMS_PER_PAGE))
+    records_start_page = summary_page_count + 2
+
+    for page_idx in range(summary_page_count):
+        if page_idx > 0:
+            document.add_page_break()
+
+        heading = document.add_heading(
+            "SUMÁRIO" if page_idx == 0 else "SUMÁRIO (continuação)",
+            level=1,
+        )
+        heading.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        for run in heading.runs:
+            run.font.size = Pt(16)
+            run.font.bold = True
+            run.font.name = "Calibri"
+        _add_title_borders(heading)
+
+        subtitle = document.add_paragraph()
+        subtitle.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        subtitle_run = subtitle.add_run(f"Projeto: {project_name}")
+        subtitle_run.font.size = Pt(10)
+        subtitle_run.font.name = "Calibri"
+
+        start = page_idx * SUMMARY_ITEMS_PER_PAGE
+        end = min(start + SUMMARY_ITEMS_PER_PAGE, len(titles))
+        summary_table = document.add_table(rows=end - start + 1, cols=2)
+        summary_table.style = "Table Grid"
+        summary_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        _set_col_widths(summary_table, [14.5, 2.0])
+
+        _set_cell_text(summary_table.cell(0, 0), "ACIONAMENTO", bold=True, size_pt=10)
+        _set_cell_text(summary_table.cell(0, 1), "PÁGINA", bold=True, size_pt=10)
+        _set_cell_background(summary_table.cell(0, 0), "D9D9D9")
+        _set_cell_background(summary_table.cell(0, 1), "D9D9D9")
+
+        for local_idx, title in enumerate(titles[start:end], start=1):
+            global_idx = start + local_idx - 1
+            page_number = records_start_page + global_idx
+            _set_cell_text(summary_table.cell(local_idx, 0), title, size_pt=9)
+            _set_cell_text(summary_table.cell(local_idx, 1), page_number, size_pt=9)
+            bg = "FFFFFF" if local_idx % 2 == 0 else "F7F7F7"
+            _set_cell_background(summary_table.cell(local_idx, 0), bg)
+            _set_cell_background(summary_table.cell(local_idx, 1), bg)
+
+    if titles:
+        document.add_page_break()
+
+    # Páginas dos acionamentos
     for row_number in range(len(dataframe_table)):
         table_row = dataframe_table.iloc[row_number]
-        title_row = dataframe_title.iloc[row_number]
+        title = titles[row_number]
 
         if row_number > 0:
             document.add_page_break()
-
-        position = (
-            _safe_str(title_row.get(position_column, ""))
-            if position_column
-            else ""
-        )
-        description = (
-            _safe_str(title_row.get(description_column, ""))
-            if description_column
-            else ""
-        )
-
-        if position and description:
-            title = f"{position} - {description}"
-        elif description:
-            title = description
-        elif position:
-            title = position
-        else:
-            title = "REGISTRO"
 
         heading = document.add_heading(title, level=1)
         heading.alignment = WD_ALIGN_PARAGRAPH.LEFT
@@ -587,12 +728,15 @@ def _build_xlsx(
 
 def processar_documento(
     excel_bytes: bytes,
+    project_name: str | None = None,
 ) -> ResultadoProcessamento:
     if not excel_bytes:
         raise ValueError("O arquivo enviado está vazio.")
 
+    normalized_project_name = (project_name or "Projeto").strip() or "Projeto"
+
     dataframe = _prepare_dataframe(excel_bytes)
-    document_bytes = _build_docx(dataframe)
+    document_bytes = _build_docx(dataframe, normalized_project_name)
     workbook_bytes, transport_count, command_count, branch_count = _build_xlsx(
         dataframe,
     )

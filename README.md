@@ -2,9 +2,17 @@
 
 Aplicação Streamlit que recebe uma planilha XLSX e gera:
 
-- `RELATORIO_FINAL.docx`: uma página por registro;
-- `RELATORIO_DESCIDAS.xlsx`: relatório de legendas com as abas `TRANSPORTADORES`, `COMANDO` e `RAMAL DE ALIMENTAÇÃO`;
+- `RELATORIO_FINAL_<NOME_DO_ARQUIVO>.docx`: relatório Word com capa, logo da Usinox, sumário e uma página por registro;
+- `RELATORIO_DESCIDAS_<NOME_DO_ARQUIVO>.xlsx`: relatório de legendas com as abas `TRANSPORTADORES`, `COMANDO` e `RAMAL DE ALIMENTAÇÃO`;
 - um ZIP contendo os dois resultados.
+
+## Recursos da versão atual
+
+- o nome do projeto é extraído automaticamente do nome do arquivo enviado;
+- a capa do Word usa o logo da Usinox;
+- o rodapé do Word usa o logo da Usinox e paginação automática;
+- o Word inclui um sumário com a página estimada de cada acionamento;
+- a coluna artificial `DESCIDA` foi removida do Excel.
 
 ## Segurança
 
@@ -39,6 +47,7 @@ A aplicação receberá um endereço `streamlit.app` que poderá ser compartilha
 agente_relatorios/
 ├── app.py
 ├── processor.py
+├── logo_usinox.jpg
 ├── requirements.txt
 ├── supabase_schema.sql
 ├── .gitignore
@@ -56,7 +65,7 @@ O arquivo `supabase_schema.sql` contém uma tabela inicial para histórico de ex
 
 - a primeira aba do arquivo enviado é usada como base;
 - linhas totalmente vazias são removidas;
-- o Word mantém uma página por registro;
+- o Word mantém uma página por registro de acionamento;
 - registros com `POS` contendo `WF` vão para `RAMAL DE ALIMENTAÇÃO`;
 - registros com `WM` preenchido, exceto `WF`, vão para `TRANSPORTADORES`;
 - registros de `WC`, `WN`, `WS` ou com campos de comando preenchidos vão para `COMANDO`;
