@@ -9,7 +9,11 @@ from typing import Any
 import pandas as pd
 from docx import Document
 from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import (
+    WD_ALIGN_PARAGRAPH,
+    WD_TAB_ALIGNMENT,
+    WD_TAB_LEADER,
+)
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
@@ -17,7 +21,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 
-SUMMARY_ITEMS_PER_PAGE = 24
+SUMMARY_ITEMS_PER_PAGE = 42
 LOGO_FILENAME = "logo_usinox.jpg"
 
 
@@ -399,24 +403,28 @@ def _build_docx(dataframe: pd.DataFrame, project_name: str) -> bytes:
 
         start = page_idx * SUMMARY_ITEMS_PER_PAGE
         end = min(start + SUMMARY_ITEMS_PER_PAGE, len(titles))
-        summary_table = document.add_table(rows=end - start + 1, cols=2)
-        summary_table.style = "Table Grid"
-        summary_table.alignment = WD_TABLE_ALIGNMENT.CENTER
-        _set_col_widths(summary_table, [14.5, 2.0])
 
-        _set_cell_text(summary_table.cell(0, 0), "ACIONAMENTO", bold=True, size_pt=10)
-        _set_cell_text(summary_table.cell(0, 1), "PÁGINA", bold=True, size_pt=10)
-        _set_cell_background(summary_table.cell(0, 0), "D9D9D9")
-        _set_cell_background(summary_table.cell(0, 1), "D9D9D9")
-
-        for local_idx, title in enumerate(titles[start:end], start=1):
-            global_idx = start + local_idx - 1
+        for local_idx, title in enumerate(titles[start:end]):
+            global_idx = start + local_idx
             page_number = records_start_page + global_idx
-            _set_cell_text(summary_table.cell(local_idx, 0), title, size_pt=9)
-            _set_cell_text(summary_table.cell(local_idx, 1), page_number, size_pt=9)
-            bg = "FFFFFF" if local_idx % 2 == 0 else "F7F7F7"
-            _set_cell_background(summary_table.cell(local_idx, 0), bg)
-            _set_cell_background(summary_table.cell(local_idx, 1), bg)
+
+            item = document.add_paragraph()
+            item.paragraph_format.space_before = Pt(0)
+            item.paragraph_format.space_after = Pt(0)
+            item.paragraph_format.line_spacing = 1
+            item.paragraph_format.tab_stops.add_tab_stop(
+                Cm(16.0),
+                WD_TAB_ALIGNMENT.RIGHT,
+                WD_TAB_LEADER.DOTS,
+            )
+
+            title_run = item.add_run(title)
+            title_run.font.size = Pt(8)
+            title_run.font.name = "Calibri"
+
+            page_run = item.add_run(f"\t{page_number}")
+            page_run.font.size = Pt(8)
+            page_run.font.name = "Calibri"
 
     if titles:
         document.add_page_break()
